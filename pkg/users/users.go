@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-ldap/ldap"
+	"golang.org/x/crypto/bcrypt"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -71,7 +72,6 @@ func (t *userMigrateTask) Run() error {
 			klog.Error(err)
 			return err
 		}
-
 		for _, entry := range response.Entries {
 			uid := entry.GetAttributeValue(ldapAttributeUserID)
 			email := entry.GetAttributeValue(ldapAttributeMail)
@@ -85,6 +85,7 @@ func (t *userMigrateTask) Run() error {
 			if _, err := mail.ParseAddress(email); err != nil {
 				email = ""
 			}
+			encryptedPassword, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 			user := User{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "User",
@@ -92,13 +93,22 @@ func (t *userMigrateTask) Run() error {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              uid,
-					CreationTimestamp: metav1.Time{Time: createTimestamp}},
+					CreationTimestamp: metav1.Time{Time: createTimestamp},
+					Annotations: map[string]string{
+						"kubesphere.io/description":            description,
+						"iam.kubesphere.io/password-encrypted": "true",
+					},
+				},
 				Spec: UserSpec{
 					Email:             email,
-					Description:       description,
 					Lang:              lang,
-					EncryptedPassword: pwd,
-				}}
+					EncryptedPassword: string(encryptedPassword),
+				},
+				Status: UserStatus{
+					State:              "Active",
+					LastTransitionTime: &metav1.Time{Time: time.Now()},
+				},
+			}
 			users = append(users, user)
 		}
 
@@ -110,29 +120,78 @@ func (t *userMigrateTask) Run() error {
 		break
 	}
 
-	cli := t.k8sClient.(*kubernetes.Clientset)
 	for _, user := range users {
 		// deprecated account
 		if user.Name == "sonarqube" {
 			continue
 		}
-		outputData, _ := json.Marshal(user)
 		klog.Infof("migrate users: %s", user.Name)
-		err := cli.RESTClient().
-			Post().
-			AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/users")).
-			Body(outputData).
-			Do().Error()
-
+		old, err := t.getUser(user.Name)
 		if err != nil {
-			if errors.IsBadRequest(err) || errors.IsAlreadyExists(err) {
-				klog.Warning(err)
+			if errors.IsNotFound(err) {
+				err = t.createUser(&user)
+				if err != nil {
+					klog.Error(err)
+				}
 				continue
 			}
 			klog.Error(err)
 			return err
 		}
+		user.ResourceVersion = old.ResourceVersion
+		err = t.updateUser(&user)
+		if err != nil {
+			klog.Error(err)
+			return err
+		}
 	}
+	return nil
+}
 
+func (t *userMigrateTask) getUser(username string) (*User, error) {
+	cli := t.k8sClient.(*kubernetes.Clientset)
+	data, err := cli.RESTClient().
+		Get().
+		AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/users/%s", username)).
+		DoRaw()
+	if err != nil {
+		return nil, err
+	}
+	var old User
+	err = json.Unmarshal(data, &old)
+	if err != nil {
+		klog.Error(err)
+		return nil, err
+	}
+	return &old, nil
+}
+
+func (t *userMigrateTask) updateUser(user *User) error {
+	cli := t.k8sClient.(*kubernetes.Clientset)
+	outputData, _ := json.Marshal(user)
+	err := cli.RESTClient().
+		Put().
+		AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/users/%s", user.Name)).
+		Body(outputData).
+		Do().Error()
+	if err != nil {
+		klog.Error(err)
+		return err
+	}
+	return nil
+}
+
+func (t *userMigrateTask) createUser(user *User) error {
+	cli := t.k8sClient.(*kubernetes.Clientset)
+	outputData, _ := json.Marshal(user)
+	err := cli.RESTClient().
+		Post().
+		AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/users")).
+		Body(outputData).
+		Do().Error()
+	if err != nil {
+		klog.Error(err)
+		return err
+	}
 	return nil
 }

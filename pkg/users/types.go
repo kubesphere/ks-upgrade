@@ -11,7 +11,26 @@ type User struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec UserSpec `json:"spec"`
+
+	// +optional
+	Status UserStatus `json:"status,omitempty"`
 }
+
+// UserStatus defines the observed state of User
+type UserStatus struct {
+	// The user status
+	// +optional
+	State UserState `json:"state,omitempty"`
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// +optional
+	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
+	// Last login attempt timestamp
+	// +optional
+	LastLoginTime *metav1.Time `json:"lastLoginTime,omitempty"`
+}
+
+type UserState string
 
 type UserSpec struct {
 	// Unique email address(https://www.ietf.org/rfc/rfc5322.txt).
