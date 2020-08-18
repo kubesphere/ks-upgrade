@@ -112,9 +112,8 @@ func (t *userMigrateTask) Run() error {
 
 	cli := t.k8sClient.(*kubernetes.Clientset)
 	for _, user := range users {
-		user.Spec.EncryptedPassword = initialPassword
 		outputData, _ := json.Marshal(user)
-		klog.Infof("migrate users: %s: %s", user.Name)
+		klog.Infof("migrate users: %s", user.Name)
 		err := cli.RESTClient().
 			Post().
 			AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/users")).

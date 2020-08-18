@@ -36,6 +36,10 @@ func (t *roleBindingMigrateTask) Run() error {
 	}
 
 	for _, oldRoleBinding := range oldRoleBindings.Items {
+		// <workspace>-admin <workspace>-viewer role binding
+		if oldRoleBinding.Name == "admin" || oldRoleBinding.Name == "viewer" {
+			continue
+		}
 		role := migrateMapping[oldRoleBinding.RoleRef.Name]
 		if role == "" {
 			continue
