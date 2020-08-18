@@ -112,6 +112,10 @@ func (t *userMigrateTask) Run() error {
 
 	cli := t.k8sClient.(*kubernetes.Clientset)
 	for _, user := range users {
+		// deprecated account
+		if user.Name == "sonarqube" {
+			continue
+		}
 		outputData, _ := json.Marshal(user)
 		klog.Infof("migrate users: %s", user.Name)
 		err := cli.RESTClient().
