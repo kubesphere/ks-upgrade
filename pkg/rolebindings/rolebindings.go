@@ -36,8 +36,12 @@ func (t *roleBindingMigrateTask) Run() error {
 	}
 
 	for _, oldRoleBinding := range oldRoleBindings.Items {
-		// <workspace>-admin <workspace>-viewer role binding
+		// delete <workspace>-admin <workspace>-viewer role binding after upgrade
 		if oldRoleBinding.Name == "admin" || oldRoleBinding.Name == "viewer" {
+			if err := t.deleteRoleBinding(&oldRoleBinding); err != nil {
+				klog.Error(err)
+				return err
+			}
 			continue
 		}
 		role := migrateMapping[oldRoleBinding.RoleRef.Name]
@@ -73,19 +77,35 @@ func (t *roleBindingMigrateTask) Run() error {
 	for _, roleBinding := range roleBindings {
 		outputData, _ := json.Marshal(roleBinding)
 		klog.Infof("migrate roleBinding: namespace:%s, %s: %s", roleBinding.Namespace, roleBinding.Name, string(outputData))
-		
-		err = t.k8sClient.RbacV1().RoleBindings(roleBinding.Namespace).Delete(roleBinding.Name, metav1.NewDeleteOptions(0))
-		if err != nil && !errors.IsNotFound(err) {
+
+		if err := t.deleteRoleBinding(&roleBinding); err != nil {
 			klog.Error(err)
 			return err
 		}
 
-		_, err = t.k8sClient.RbacV1().RoleBindings(roleBinding.Namespace).Create(&roleBinding)
-		if err != nil && !errors.IsAlreadyExists(err) {
+		if err := t.createRoleBinding(&roleBinding); err != nil {
 			klog.Error(err)
 			return err
 		}
 	}
 
+	return nil
+}
+
+func (t *roleBindingMigrateTask) deleteRoleBinding(roleBinding *rbacv1.RoleBinding) error {
+	err := t.k8sClient.RbacV1().RoleBindings(roleBinding.Namespace).Delete(roleBinding.Name, metav1.NewDeleteOptions(0))
+	if err != nil && !errors.IsNotFound(err) {
+		klog.Error(err)
+		return err
+	}
+	return nil
+}
+
+func (t *roleBindingMigrateTask) createRoleBinding(roleBinding *rbacv1.RoleBinding) error {
+	_, err := t.k8sClient.RbacV1().RoleBindings(roleBinding.Namespace).Create(roleBinding)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		klog.Error(err)
+		return err
+	}
 	return nil
 }
