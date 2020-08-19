@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-ldap/ldap"
+	"github.com/go-redis/redis"
 	"golang.org/x/crypto/bcrypt"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -11,6 +12,7 @@ import (
 	"k8s.io/klog"
 	"kubesphere.io/ks-upgrade/pkg/task"
 	"net/mail"
+	"strings"
 	"time"
 )
 
@@ -40,13 +42,13 @@ const (
 )
 
 type userMigrateTask struct {
-	k8sClient  kubernetes.Interface
-	ldapClient ldap.Client
+	k8sClient   kubernetes.Interface
+	ldapClient  ldap.Client
+	redisClient *redis.Client
 }
 
-func NewUserMigrateTask(k8sClient kubernetes.Interface, ldapClient ldap.Client) task.UpgradeTask {
-
-	return &userMigrateTask{k8sClient: k8sClient, ldapClient: ldapClient}
+func NewUserMigrateTask(k8sClient kubernetes.Interface, ldapClient ldap.Client, redisClient *redis.Client) task.UpgradeTask {
+	return &userMigrateTask{k8sClient: k8sClient, ldapClient: ldapClient, redisClient: redisClient}
 }
 
 func (t *userMigrateTask) Run() error {
@@ -108,6 +110,12 @@ func (t *userMigrateTask) Run() error {
 					State:              "Active",
 					LastTransitionTime: &metav1.Time{Time: time.Now()},
 				},
+			}
+			if lastLoginTime, err := t.getLastLoginTime(uid); err != nil {
+				klog.Error(err)
+				return err
+			} else if !lastLoginTime.IsZero() {
+				user.Status.LastLoginTime = &metav1.Time{Time: lastLoginTime}
 			}
 			users = append(users, user)
 		}
@@ -194,4 +202,15 @@ func (t *userMigrateTask) createUser(user *User) error {
 		return err
 	}
 	return nil
+}
+
+func (t *userMigrateTask) getLastLoginTime(username string) (time.Time, error) {
+	loginRecord, err := t.redisClient.LRange(fmt.Sprintf("kubesphere:users:%s:login-log", username), -1, -1).Result()
+	if err != nil {
+		return time.Time{}, err
+	}
+	if len(loginRecord) > 0 {
+		return time.Parse("2006-01-02T15:04:05Z", strings.Split(loginRecord[0], ",")[0])
+	}
+	return time.Time{}, nil
 }
