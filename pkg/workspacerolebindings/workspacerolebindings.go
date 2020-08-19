@@ -86,5 +86,12 @@ func (t *workspaceRoleBindingMigrateTask) Run() error {
 		}
 	}
 
+	// delete legacy workspace role binding after upgrade
+	if err := t.k8sClient.RbacV1().ClusterRoleBindings().
+		DeleteCollection(metav1.NewDeleteOptions(0), metav1.ListOptions{LabelSelector: "kubesphere.io/workspace"}); err != nil {
+		klog.Error(err)
+		return err
+	}
+
 	return nil
 }
