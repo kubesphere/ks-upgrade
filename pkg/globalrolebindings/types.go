@@ -19,3 +19,14 @@ type GlobalRoleBinding struct {
 	// If the RoleRef cannot be resolved, the Authorizer must return an error.
 	RoleRef rbacv1.RoleRef `json:"roleRef" protobuf:"bytes,3,opt,name=roleRef"`
 }
+
+type GlobalRole struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard object's metadata.
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Rules holds all the PolicyRules for this GlobalRole
+	// +optional
+	Rules []rbacv1.PolicyRule `json:"rules" protobuf:"bytes,2,rep,name=rules"`
+}
