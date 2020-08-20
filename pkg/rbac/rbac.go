@@ -5,13 +5,20 @@ import (
 	"strings"
 )
 
-func RulesMatchesRequired(rules []rbacv1.PolicyRule, required rbacv1.PolicyRule) bool {
-	for _, rule := range rules {
-		if ruleMatchesRequired(rule, required) {
-			return true
+func RulesMatchesRequired(rules []rbacv1.PolicyRule, required []rbacv1.PolicyRule) bool {
+	for _, r := range required {
+		allowed := false
+		for _, rule := range rules {
+			if ruleMatchesRequired(rule, r) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func ruleMatchesRequired(rule rbacv1.PolicyRule, required rbacv1.PolicyRule) bool {

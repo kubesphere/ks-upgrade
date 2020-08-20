@@ -36,6 +36,7 @@ func (t *globalRoleBindingMigrateTask) Run() error {
 
 	globalRoleBindings := make([]GlobalRoleBinding, 0)
 	globalRoles := make([]GlobalRole, 0)
+	legacyClusterRoleBindings := make([]string, 0)
 
 	for _, clusterRoleBinding := range clusterRoleBindings.Items {
 		if len(clusterRoleBinding.Subjects) != 1 ||
@@ -57,10 +58,15 @@ func (t *globalRoleBindingMigrateTask) Run() error {
 			if clusterRole.Annotations["kubesphere.io/creator"] == "" {
 				continue
 			}
-			globalRole := newGlobalRole(clusterRole)
+			globalRole, err := t.newGlobalRole(clusterRole)
+			if err != nil {
+				klog.Error(err)
+				return err
+			}
 			globalRoles = append(globalRoles, globalRole)
 			globalRoleRef = globalRole.Name
 		}
+		legacyClusterRoleBindings = append(legacyClusterRoleBindings, clusterRoleBinding.Name)
 		globalRoleBinding := newGlobalRoleBinding(clusterRoleBinding.Subjects[0].Name, globalRoleRef)
 		globalRoleBindings = append(globalRoleBindings, globalRoleBinding)
 	}
@@ -94,14 +100,9 @@ func (t *globalRoleBindingMigrateTask) Run() error {
 		}
 	}
 
-	for _, clusterRoleBinding := range clusterRoleBindings.Items {
-		if len(clusterRoleBinding.Subjects) != 1 ||
-			clusterRoleBinding.Subjects[0].Kind != "User" ||
-			clusterRoleBinding.Name != clusterRoleBinding.Subjects[0].Name {
-			continue
-		}
+	for _, clusterRoleBinding := range legacyClusterRoleBindings {
 		if err := t.k8sClient.RbacV1().ClusterRoleBindings().
-			Delete(clusterRoleBinding.Name, metav1.NewDeleteOptions(0)); err != nil {
+			Delete(clusterRoleBinding, metav1.NewDeleteOptions(0)); err != nil {
 			klog.Warningf("delete legacy cluster role binding failed: %s", err)
 		}
 	}
@@ -109,53 +110,146 @@ func (t *globalRoleBindingMigrateTask) Run() error {
 	return nil
 }
 
-var customRoleMapping = map[string]rbacv1.PolicyRule{
+var customRoleMapping = map[string][]rbacv1.PolicyRule{
 	"role-template-view-users": {
-		Verbs:     []string{"get", "list"},
-		APIGroups: []string{"*"},
-		Resources: []string{"users"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"iam.kubesphere.io"},
+			Resources: []string{"users"},
+		},
 	},
 	"role-template-view-workspaces": {
-		Verbs:     []string{"get", "list"},
-		APIGroups: []string{"*"},
-		Resources: []string{"workspaces"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"tenant.kubesphere.io"},
+			Resources: []string{"workspaces"},
+		},
 	},
 	"role-template-view-roles": {
-		Verbs:     []string{"get", "list"},
-		APIGroups: []string{"*"},
-		Resources: []string{"clusterroles"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"rbac.authorization.k8s.io"},
+			Resources: []string{"clusterroles"},
+		},
 	},
 	"role-template-view-app-templates": {
-		Verbs:     []string{"get", "list"},
-		APIGroups: []string{"openpitrix.io"},
-		Resources: []string{"apps"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"openpitrix.io"},
+			Resources: []string{"apps"},
+		},
 	},
 	"role-template-manage-users": {
-		Verbs:     []string{"get", "list", "create", "delete", "update"},
-		APIGroups: []string{"*"},
-		Resources: []string{"users"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"iam.kubesphere.io"},
+			Resources: []string{"users"},
+		},
+		{
+			Verbs:     []string{"create"},
+			APIGroups: []string{"iam.kubesphere.io"},
+			Resources: []string{"users"},
+		},
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{"iam.kubesphere.io"},
+			Resources: []string{"users"},
+		},
+		{
+			Verbs:     []string{"update"},
+			APIGroups: []string{"iam.kubesphere.io"},
+			Resources: []string{"users"},
+		},
 	},
 	"role-template-manage-workspaces": {
-		Verbs:     []string{"get", "list", "create", "delete", "update"},
-		APIGroups: []string{"*"},
-		Resources: []string{"workspaces"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"tenant.kubesphere.io"},
+			Resources: []string{"workspaces"},
+		},
+		{
+			Verbs:     []string{"create"},
+			APIGroups: []string{"tenant.kubesphere.io"},
+			Resources: []string{"workspaces"},
+		},
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{"tenant.kubesphere.io"},
+			Resources: []string{"workspaces"},
+		},
+		{
+			Verbs:     []string{"update"},
+			APIGroups: []string{"tenant.kubesphere.io"},
+			Resources: []string{"workspaces"},
+		},
 	},
 	"role-template-manage-roles": {
-		Verbs:     []string{"get", "list", "create", "delete", "update"},
-		APIGroups: []string{"*"},
-		Resources: []string{"clusterroles"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"rbac.authorization.k8s.io"},
+			Resources: []string{"clusterroles"},
+		},
+		{
+			Verbs:     []string{"create"},
+			APIGroups: []string{"rbac.authorization.k8s.io"},
+			Resources: []string{"clusterroles"},
+		},
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{"rbac.authorization.k8s.io"},
+			Resources: []string{"clusterroles"},
+		},
+		{
+			Verbs:     []string{"update"},
+			APIGroups: []string{"rbac.authorization.k8s.io"},
+			Resources: []string{"clusterroles"},
+		},
 	},
 	"role-template-manage-app-templates": {
-		Verbs:     []string{"get", "list", "create", "delete", "update"},
-		APIGroups: []string{"openpitrix.io"},
-		Resources: []string{"apps"},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{"openpitrix.io"},
+			Resources: []string{"apps"},
+		},
+		{
+			Verbs:     []string{"create"},
+			APIGroups: []string{"openpitrix.io"},
+			Resources: []string{"apps"},
+		},
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{"openpitrix.io"},
+			Resources: []string{"apps"},
+		},
+		{
+			Verbs:     []string{"update"},
+			APIGroups: []string{"openpitrix.io"},
+			Resources: []string{"apps"},
+		},
 	},
 }
 
-func newGlobalRole(clusterRole *rbacv1.ClusterRole) GlobalRole {
+func (t *globalRoleBindingMigrateTask) newGlobalRole(clusterRole *rbacv1.ClusterRole) (GlobalRole, error) {
+	cli := t.k8sClient.(*kubernetes.Clientset)
 	aggregationRoles := make([]string, 0)
+	policyRules := make([]rbacv1.PolicyRule, 0)
 	for role, policyRule := range customRoleMapping {
 		if rbac.RulesMatchesRequired(clusterRole.Rules, policyRule) {
+			data, err := cli.RESTClient().
+				Get().
+				AbsPath(fmt.Sprintf("/apis/iam.kubesphere.io/v1alpha2/globalroles/%s", role)).
+				DoRaw()
+			if err != nil {
+				klog.Error(err)
+				return GlobalRole{}, err
+			}
+			var roleTemplate GlobalRole
+			err = json.Unmarshal(data, &roleTemplate)
+			if err != nil {
+				klog.Error(err)
+				return GlobalRole{}, err
+			}
+			policyRules = append(policyRules, roleTemplate.Rules...)
 			aggregationRoles = append(aggregationRoles, role)
 		}
 	}
@@ -169,10 +263,11 @@ func newGlobalRole(clusterRole *rbacv1.ClusterRole) GlobalRole {
 			Name: clusterRole.Name,
 			Annotations: map[string]string{
 				"iam.kubesphere.io/aggregation-roles": string(roles),
+				"kubesphere.io/creator":               clusterRole.Annotations["kubesphere.io/creator"],
 			},
 		},
-		Rules: []rbacv1.PolicyRule{},
-	}
+		Rules: policyRules,
+	}, nil
 }
 
 func newGlobalRoleBinding(username string, globalRoleRef string) GlobalRoleBinding {
