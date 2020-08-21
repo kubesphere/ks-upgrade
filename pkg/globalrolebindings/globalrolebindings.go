@@ -264,6 +264,7 @@ func (t *globalRoleBindingMigrateTask) newGlobalRole(clusterRole *rbacv1.Cluster
 			Annotations: map[string]string{
 				"iam.kubesphere.io/aggregation-roles": string(roles),
 				"kubesphere.io/creator":               clusterRole.Annotations["kubesphere.io/creator"],
+				"kubesphere.io/description":           clusterRole.Annotations["kubesphere.io/description"],
 			},
 		},
 		Rules: policyRules,

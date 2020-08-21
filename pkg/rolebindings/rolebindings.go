@@ -172,6 +172,7 @@ func (t *roleBindingMigrateTask) newRole(oldRole *rbacv1.Role) (rbacv1.Role, err
 			Annotations: map[string]string{
 				"iam.kubesphere.io/aggregation-roles": string(roles),
 				"kubesphere.io/creator":               oldRole.Annotations["kubesphere.io/creator"],
+				"kubesphere.io/description":           oldRole.Annotations["kubesphere.io/description"],
 			},
 			ResourceVersion: oldRole.ResourceVersion,
 		},
