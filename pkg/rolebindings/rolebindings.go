@@ -227,6 +227,11 @@ var customRoleMapping = map[string][]rbacv1.PolicyRule{
 			APIGroups: []string{""},
 			Resources: []string{"configmaps"},
 		},
+		{
+			Verbs:     []string{"get", "list"},
+			APIGroups: []string{""},
+			Resources: []string{"persistentvolumeclaims"},
+		},
 	},
 	"role-template-manage-app-workloads": {
 		{
@@ -273,6 +278,11 @@ var customRoleMapping = map[string][]rbacv1.PolicyRule{
 			Verbs:     []string{"delete"},
 			APIGroups: []string{""},
 			Resources: []string{"configmaps"},
+		},
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{""},
+			Resources: []string{"persistentvolumeclaims"},
 		},
 	},
 	"role-template-view-configmaps": {
@@ -343,6 +353,13 @@ var customRoleMapping = map[string][]rbacv1.PolicyRule{
 			Verbs:     []string{"delete"},
 			APIGroups: []string{"rbac.authorization.k8s.io"},
 			Resources: []string{"roles"},
+		},
+	},
+	"role-template-manage-project-settings": {
+		{
+			Verbs:     []string{"delete"},
+			APIGroups: []string{""},
+			Resources: []string{"namespaces"},
 		},
 	},
 }
