@@ -179,12 +179,13 @@ func (g *globalCustomRoleReCreator) Recreate() error {
 					newGlobalRole.Rules = append(newGlobalRole.Rules, roleTemplate.Rules...)
 				}
 
+				klog.Infof("recreate global role %s with aggregating role: %s", newGlobalRole.Name, string(marshal))
 				// delete the old custom role
 				if err := deleteRole(g.client, path, globalrole.Name); err != nil {
 					return err
 				}
 
-				if err := createRole(g.client, path, newGlobalRole); err != nil {
+				if err := createRole(g.client, path, newGlobalRole.Name, newGlobalRole); err != nil {
 					return err
 				}
 			}
@@ -262,11 +263,12 @@ func (w *workspaceCustomRoleReCreator) Recreate() error {
 					newWorkspaceRole.Rules = append(newWorkspaceRole.Rules, roleTemplate.Rules...)
 				}
 
+				klog.Infof("recreate workspace role %s with aggregating role: %s", newWorkspaceRole.Name, string(marshal))
 				// delete the old custom role
 				if err := deleteRole(w.client, path, workspaceRole.Name); err != nil {
 					return err
 				}
-				if err := createRole(w.client, path, newWorkspaceRole); err != nil {
+				if err := createRole(w.client, path, newWorkspaceRole.Name, newWorkspaceRole); err != nil {
 					return err
 				}
 			}
@@ -340,10 +342,11 @@ func (w *customRoleReCreator) Recreate() error {
 					newRole.Rules = append(newRole.Rules, roleTemplate.Rules...)
 				}
 
+				klog.Infof("recreate role %s with aggregating role: %s", newRole.Name, string(marshal))
 				if err := deleteRole(w.client, pathWithNs, role.Name); err != nil {
 					return err
 				}
-				if err := createRole(w.client, pathWithNs, newRole); err != nil {
+				if err := createRole(w.client, pathWithNs, newRole.Name, newRole); err != nil {
 					return err
 				}
 			}
@@ -357,10 +360,12 @@ func deleteRole(clientSet *kubernetes.Clientset, path, name string) error {
 	if err != nil {
 		return err
 	}
+
+	klog.Infof("deleted role %s", name)
 	return nil
 }
 
-func createRole(clientSet *kubernetes.Clientset, path string, body interface{}) error {
+func createRole(clientSet *kubernetes.Clientset, path, name string, body interface{}) error {
 	marshal, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -369,6 +374,7 @@ func createRole(clientSet *kubernetes.Clientset, path string, body interface{}) 
 	if err != nil {
 		return err
 	}
+	klog.Infof("created role %s", name)
 
 	return nil
 }
