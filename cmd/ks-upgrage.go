@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
 	"kubesphere.io/ks-upgrade/pkg/globalrolebindings"
+	"kubesphere.io/ks-upgrade/pkg/role"
 	"kubesphere.io/ks-upgrade/pkg/rolebindings"
 	"kubesphere.io/ks-upgrade/pkg/task"
 	"kubesphere.io/ks-upgrade/pkg/users"
@@ -44,6 +45,7 @@ func main() {
 	tasks = append(tasks, workspaces.NewWorkspaceMigrateTask(k8sClient))
 	tasks = append(tasks, workspacerolebindings.NewWorkspaceRoleBindingMigrateTask(k8sClient))
 	tasks = append(tasks, rolebindings.NewRoleBindingMigrateTask(k8sClient))
+	tasks = append(tasks, role.NewRoleMigrateTask(k8sClient))
 
 	for _, task := range tasks {
 		klog.Infof("starting upgrade: %T", task)
