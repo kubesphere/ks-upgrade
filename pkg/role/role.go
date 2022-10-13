@@ -142,9 +142,10 @@ func (g *globalCustomRoleReCreator) Recreate() error {
 	}
 	for _, globalrole := range globalRoleList.Items {
 		if isValidCustomRole(globalrole.ObjectMeta, g.builtinRoles) {
-			oldAggregateRoles := make([]string, 0)
-			if err := json.Unmarshal([]byte(globalrole.Annotations["iam.kubesphere.io/aggregation-roles"]), &oldAggregateRoles); err != nil {
-				return err
+			oldAggregateRoles, err := getAggregationRoles(globalrole.ObjectMeta)
+			if err != nil {
+				klog.Warning("get aggregation roles of %s failed, %s", globalrole.Name, err.Error())
+				continue
 			}
 
 			trimmed, aggregateRoles := trimRoleTemplates(g.deprecatedRoleTemplates, oldAggregateRoles)
@@ -174,7 +175,11 @@ func (g *globalCustomRoleReCreator) Recreate() error {
 					roleTemplate := &globalrolebindings.GlobalRole{}
 					err := listRole(g.client, path, a, roleTemplate)
 					if err != nil {
-						return err
+						if errors.IsNotFound(err) {
+							klog.Warning(err)
+						} else {
+							return err
+						}
 					}
 					newGlobalRole.Rules = append(newGlobalRole.Rules, roleTemplate.Rules...)
 				}
@@ -223,9 +228,10 @@ func (w *workspaceCustomRoleReCreator) Recreate() error {
 			!suffixInSliceString(workspaceRole.Name, w.builtinRoles) &&
 			workspaceRole.Annotations["iam.kubesphere.io/aggregation-roles"] != "" {
 
-			oldAggregateRoles := make([]string, 0)
-			if err := json.Unmarshal([]byte(workspaceRole.Annotations["iam.kubesphere.io/aggregation-roles"]), &oldAggregateRoles); err != nil {
-				return err
+			oldAggregateRoles, err := getAggregationRoles(workspaceRole.ObjectMeta)
+			if err != nil {
+				klog.Warning("get aggregation roles of %s failed, %s", workspaceRole.Name, err.Error())
+				continue
 			}
 
 			trimmed, aggregateRoles := trimRoleTemplates(w.deprecatedRoleTemplates, oldAggregateRoles)
@@ -258,7 +264,11 @@ func (w *workspaceCustomRoleReCreator) Recreate() error {
 					roleTemplate := &WorkspaceRole{}
 					err := listRole(w.client, path, a, roleTemplate)
 					if err != nil {
-						return err
+						if errors.IsNotFound(err) {
+							klog.Warning(err)
+						} else {
+							return err
+						}
 					}
 					newWorkspaceRole.Rules = append(newWorkspaceRole.Rules, roleTemplate.Rules...)
 				}
@@ -303,9 +313,10 @@ func (w *customRoleReCreator) Recreate() error {
 		// Confirm the role isn`t builtinRole or role template
 		if isValidCustomRole(role.ObjectMeta, w.builtinRoles) {
 
-			oldAggregateRoles := make([]string, 0)
-			if err := json.Unmarshal([]byte(role.Annotations["iam.kubesphere.io/aggregation-roles"]), &oldAggregateRoles); err != nil {
-				return err
+			oldAggregateRoles, err := getAggregationRoles(role.ObjectMeta)
+			if err != nil {
+				klog.Warning("get aggregation roles of %s failed, %s", role.Name, err.Error())
+				continue
 			}
 
 			pathWithNs := fmt.Sprintf("%s/namespaces/%s/%s", rbacPath, role.Namespace, roleTypeRole)
@@ -337,7 +348,11 @@ func (w *customRoleReCreator) Recreate() error {
 					roleTemplate := &v1.Role{}
 					err := listRole(w.client, pathWithNs, a, roleTemplate)
 					if err != nil {
-						return err
+						if errors.IsNotFound(err) {
+							klog.Warning(err)
+						} else {
+							return err
+						}
 					}
 					newRole.Rules = append(newRole.Rules, roleTemplate.Rules...)
 				}
@@ -435,4 +450,13 @@ func isValidCustomRole(meta metav1.ObjectMeta, builtinRoles []string) bool {
 		return true
 	}
 	return false
+}
+
+func getAggregationRoles(meta metav1.ObjectMeta) ([]string, error) {
+	roles := make([]string, 0)
+	err := json.Unmarshal([]byte(meta.Annotations["iam.kubesphere.io/aggregation-roles"]), roles)
+	if err != nil {
+		return nil, err
+	}
+	return roles, nil
 }
