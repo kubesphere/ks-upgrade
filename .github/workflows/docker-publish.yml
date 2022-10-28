@@ -30,17 +30,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Build image
-        run: docker build . --file Dockerfile --tag $IMAGE_NAME
-
       - name: Log into registry
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
 
-      - name: Push image
+      - name: Build and push image
         run: |
           IMAGE_ID=$IMAGE_REPO/$IMAGE_NAME
-
           echo IMAGE_ID=$IMAGE_ID
-
-          docker tag $IMAGE_NAME $IMAGE_ID:$IMAGE_VERSION
-          docker push $IMAGE_ID:$IMAGE_VERSION
+          docker buildx build --platform linux/amd64,linux/arm64 .  --push --file Dockerfile --tag $IMAGE_ID:IMAGE_VERSION
