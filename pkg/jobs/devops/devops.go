@@ -603,29 +603,38 @@ func (j *upgradeJob) parseArgocdValues(cluster v3apicluster.Cluster) (err error)
 	if argocdValues, err = j.resourceStore.LoadRaw(fmt.Sprintf(HelmValuesFmt, cluster.Name, ArgoNs, ArgoCDRelease)); err != nil {
 		return
 	}
-	argocd := new(ArgoOptions)
+	argocd := &ArgoOptions{}
 	if err = json.Unmarshal(argocdValues, argocd); err != nil {
 		return
 	}
 	argocd.cleanImageNil()
 
-	// update resources.limit of argocd.Dex for starting failed
-	if strings.HasSuffix(argocd.Dex.Resources.Limits.Memory, "Mi") {
-		var dexMem int
-		if dexMem, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Memory, "Mi")); err != nil {
-			return
+	if argocd.Dex.Resources == nil || argocd.Dex.Resources.Limits == nil {
+		argocd.Dex.Resources = &ResourceRequirements{
+			Limits: &Resource{
+				Memory: "1024Mi",
+				Cpu:    "500m",
+			},
 		}
-		if dexMem < 1024 {
-			argocd.Dex.Resources.Limits.Memory = "1024Mi"
+	} else {
+		// update resources.limit of argocd.Dex for starting failed
+		if strings.HasSuffix(argocd.Dex.Resources.Limits.Memory, "Mi") {
+			var dexMem int
+			if dexMem, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Memory, "Mi")); err != nil {
+				return
+			}
+			if dexMem < 1024 {
+				argocd.Dex.Resources.Limits.Memory = "1024Mi"
+			}
 		}
-	}
-	if strings.HasSuffix(argocd.Dex.Resources.Limits.Cpu, "m") {
-		var dexCpu int
-		if dexCpu, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Cpu, "m")); err != nil {
-			return
-		}
-		if dexCpu < 500 {
-			argocd.Dex.Resources.Limits.Cpu = "500m"
+		if strings.HasSuffix(argocd.Dex.Resources.Limits.Cpu, "m") {
+			var dexCpu int
+			if dexCpu, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Cpu, "m")); err != nil {
+				return
+			}
+			if dexCpu < 500 {
+				argocd.Dex.Resources.Limits.Cpu = "500m"
+			}
 		}
 	}
 
