@@ -85,7 +85,7 @@ type coreHelper struct {
 	chartDownloader *download.ChartDownloader
 }
 
-type WatchFunc func() (context.Context, time.Duration, time.Duration, wait.ConditionWithContextFunc)
+type WatchFunc func() (ctx context.Context, interval time.Duration, timeout time.Duration, condition wait.ConditionWithContextFunc)
 
 func (c *coreHelper) CreateInstallPlanFromExtensionRef(ctx context.Context, extensionRef *model.ExtensionRef, watchFuncs ...WatchFunc) error {
 	if isHostCluster, err := c.IsHostCluster(ctx); !isHostCluster {
@@ -284,7 +284,7 @@ func (c *coreHelper) GenerateClusterScheduling(ctx context.Context, extensionRef
 			return nil
 		}
 
-		// muti-cluster mode
+		// multi-cluster mode
 		for _, cluster := range clusterList.Items {
 			cc, err := c.GetSpecifiedClusterConfiguration(ctx, cluster)
 			if err != nil {

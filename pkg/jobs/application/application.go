@@ -13,6 +13,7 @@ import (
 	"kubesphere.io/ks-upgrade/v3/api/constants"
 	v2 "kubesphere.io/ks-upgrade/v4/api/application/v2"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"strings"
 
 	"kubesphere.io/ks-upgrade/pkg/executor"
 	"kubesphere.io/ks-upgrade/pkg/model"
@@ -181,6 +182,10 @@ func (i *upgradeJob) PostUpgrade(ctx context.Context) error {
 	for _, ins := range funcList {
 		err = ins.Func(ctx)
 		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				klog.Warningf("[Application] %s: %s", ins.Name, err)
+				continue
+			}
 			klog.Errorf("[Application] %s %s", ins.Name, err)
 			return err
 		}

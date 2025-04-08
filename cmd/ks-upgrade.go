@@ -9,9 +9,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
-
 	"kubesphere.io/ks-upgrade/pkg/executor"
 	_ "kubesphere.io/ks-upgrade/pkg/jobs"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var (
@@ -132,6 +132,7 @@ func newExecutor() *executor.Executor {
 }
 
 func main() {
+	ctrl.SetLogger(klog.NewKlogr())
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("%+v", err)
 		os.Exit(1)

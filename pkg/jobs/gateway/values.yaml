@@ -5,7 +5,7 @@
 ## Overrides for generated resource names
 # See templates/_helpers.tpl
 # nameOverride:
-fullnameOverride: {{ index .Controller.Annotations "fullnameoverride" }}
+fullnameOverride: {{ .Controller.FullnameOverride }}
 
 ## Labels to apply to all resources
 ##
@@ -22,10 +22,10 @@ controller:
     image: ingress-nginx/controller
     ## for backwards compatibility consider setting the full image url via the repository value below
     ## use *either* current default registry/image or repository format or installing chart by providing the values.yaml will fail
-    repository: {{ index .Controller.Annotations "repository" }}
-    tag: "v1.10.3"
+    repository: {{ .Controller.Repository }}
+    tag: "v1.4.0"
     digest: ""
-    digestChroot: ""
+    digestChroot: sha256:b67e889f1db8692de7e41d4d9aef8de56645bf048261f31fa7f8bfc6ea2222a0
     pullPolicy: IfNotPresent
     # www-data -> uid 101
     runAsUser: 101
@@ -100,13 +100,13 @@ controller:
       https: 443
 
   # -- Election ID to use for status update
-  electionID: {{ index .Controller.Annotations "fullnameoverride" }}
+  electionID: {{ .Controller.FullnameOverride }}
 
   ## This section refers to the creation of the IngressClass resource
   ## IngressClass resources are supported since k8s >= 1.18 and required since k8s >= 1.19
   ingressClassResource:
     # -- Name of the ingressClass
-    name: {{ index .Controller.Annotations "fullnameoverride" }}
+    name: {{ .Controller.FullnameOverride }}
     # -- Is this ingressClass enabled or not
     enabled: true
     # -- Is this the default ingressClass for the cluster
@@ -121,27 +121,12 @@ controller:
 
   #  integrate with KubeSphere platform
   integrateKubeSphere:
-    scope:
-      enabled: false
-      {{- if .Controller.Scope.Namespace }}
-      namespace: {{ .Controller.Scope.Namespace }}
-      {{- else }}
-      namespace: ""
-      {{- end }}
-      # -- When scope.enabled == false, instead of watching all namespaces, we watching namespaces whose labels
-      # only match with namespaceSelector. Format like foo=bar. Defaults to empty, means watching all namespaces.
-      {{- if .Controller.Scope.NamespaceSelector }}
-      namespaceSelector: {{ .Controller.Scope.NamespaceSelector }}
-      {{- else }}
-      namespaceSelector: ""
-      {{- end }}
-    # -- Enable `Tracing` or not
     # -- Enable `Tracing` or not
     tracing: {{ index .Deployment.Annotations "servicemesh.kubesphere.io/enabled" }} 
 
   # -- For backwards compatibility with ingress.class annotation, use ingressClass.
   # Algorithm is as follows, first ingressClassName is considered, if not present, controller looks for ingress.class annotation
-  ingressClass: {{ index .Controller.Annotations "fullnameoverride" }}
+  ingressClass: {{ .Controller.FullnameOverride }}
 
   # -- Labels to add to the pod container metadata
   podLabels: {}
@@ -169,8 +154,20 @@ controller:
   # Limit the scope of the controller to a specific namespace
   scope:
     # -- Enable 'scope' or not
-    enabled: false
+    enabled: {{ .Controller.Scope.Enabled }}
     # -- Namespace to limit the controller to; defaults to $(POD_NAMESPACE)
+    {{- if .Controller.Scope.Namespace }}
+    namespace: {{ .Controller.Scope.Namespace }}
+    {{- else }}}
+    namespace: ""
+    {{- end }}
+    # -- When scope.enabled == false, instead of watching all namespaces, we watching namespaces whose labels
+    # only match with namespaceSelector. Format like foo=bar. Defaults to empty, means watching all namespaces.
+    {{- if .Controller.Scope.NamespaceSelector }}
+    namespaceSelector: {{ .Controller.Scope.NamespaceSelector }}
+    {{- else }}
+    namespaceSelector: "" 
+    {{- end }}
 
   # -- Allows customization of the configmap / nginx-configmap namespace; defaults to $(POD_NAMESPACE)
   configMapNamespace: ""
@@ -236,7 +233,7 @@ controller:
   # -- Node tolerations for server scheduling to nodes with taints
   ## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
   ##
-  tolerations: {}
+  tolerations: {{ toYaml .Deployment.Tolerations | nindent 4 }}
   #  - key: "key"
   #    operator: "Equal|Exists"
   #    value: "value"
@@ -245,7 +242,7 @@ controller:
   # -- Affinity and anti-affinity rules for server scheduling to nodes
   ## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
   ##
-  affinity: {}
+  affinity: {{ toYaml .Deployment.Affinity | nindent 4 }}
     # # An example of preferred pod anti-affinity, weight is in the range 1-100
     # podAntiAffinity:
     #   preferredDuringSchedulingIgnoredDuringExecution:
@@ -941,13 +938,13 @@ imagePullSecrets: []
 # -- TCP service key-value pairs
 ## Ref: https://github.com/kubernetes/ingress-nginx/blob/main/docs/user-guide/exposing-tcp-udp-services.md
 ##
-tcp: {}
+tcp: {{ toYaml .Controller.TCP | nindent 2 }} 
 #  8080: "default/example-tcp-svc:9000"
 
 # -- UDP service key-value pairs
 ## Ref: https://github.com/kubernetes/ingress-nginx/blob/main/docs/user-guide/exposing-tcp-udp-services.md
 ##
-udp: {}
+udp: {{ toYaml .Controller.UDP | nindent 2 }}
 #  53: "kube-system/kube-dns:53"
 
 # -- Prefix for TCP and UDP ports names in ingress controller service

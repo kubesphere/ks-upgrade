@@ -213,7 +213,7 @@ func (i *upgradeJob) PostUpgrade(ctx context.Context) error {
 	}
 
 	watchFuncs := func() (context.Context, time.Duration, time.Duration, wait.ConditionWithContextFunc) {
-		return ctx, time.Microsecond * 500, time.Minute * 5, func(ctx context.Context) (done bool, err error) {
+		return ctx, time.Second * 2, time.Minute * 10, func(ctx context.Context) (done bool, err error) {
 			ext := v4corev1alpha1.InstallPlan{}
 			if err := i.clientV4.Get(ctx, types.NamespacedName{Name: i.extensionRef.Name}, &ext, &runtimeclient.GetOptions{}); err != nil {
 				return false, err

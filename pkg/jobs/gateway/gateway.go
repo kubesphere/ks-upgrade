@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"kubesphere.io/ks-upgrade/pkg/constants"
 	"strconv"
 	"strings"
 	"text/template"
@@ -57,8 +58,8 @@ const (
 	gatewayConfigStoreKey         = storeKeyPrefix + "config"
 	prometheusIngressRuleStoreKey = storeKeyPrefix + "prometheus-ingress-rules"
 
-	appVersion               = "kubesphere-nginx-ingress-4.10.3"
-	ksIngressNginxAppVersion = "1.10.3"
+	appVersion               = "kubesphere-nginx-ingress-4.12.1"
+	ksIngressNginxAppVersion = "1.12.1"
 	kubesphereRouterPrefix   = "kubesphere-router-"
 	workspaceGatewayPrefix   = kubesphereRouterPrefix + "workspace-"
 	upgradeGatewaySuffix     = "-ingress"
@@ -74,6 +75,7 @@ const (
 	annotationHttpNodePort  = "gateway.kubesphere.io/http-nodeport"
 	annotationHttpsNodePort = "gateway.kubesphere.io/https-nodeport"
 	newClusterGatewayName   = kubesphereRouterPrefix + "cluster"
+	oldClusterGatewayName   = kubesphereRouterPrefix + "kubesphere-system"
 )
 
 var (
@@ -303,7 +305,7 @@ func (i *upgradeJob) isHostAndCreateInstallPlan(ctx context.Context) error {
 		return err
 	}
 	if !isHostCluster {
-		klog.Infof("skip creating install plan for extension %s in member cluster", i.extensionRef.Name)
+		klog.Info("skip creating install plan for extension %s in member cluster", i.extensionRef.Name)
 		return nil
 	}
 
@@ -611,7 +613,7 @@ func (i *upgradeJob) applyGatewayV2CRD(ctx context.Context) error {
 	if err != nil && k8serrors.IsNotFound(err) {
 		opt := metav1.ApplyOptions{FieldManager: "kubectl"}
 		if err := i.coreHelper.ApplyCRDsFromExtensionRef(ctx, i.extensionRef, opt, nil); err != nil {
-			klog.Errorf("failed to ApplyCRDsFromExtensionRef %s", err)
+			klog.Errorf("failed to ApplyCrdsFromExtesionRef %s", err)
 			return err
 		}
 		klog.Info("apply gateway v2 crd success")
@@ -707,7 +709,7 @@ func (i *upgradeJob) upgradeGateway(ctx context.Context, gatewayName string) err
 	for _, gatewayV1 := range gatewayV1List.Items {
 		if gatewayName == gatewayV1.Name {
 			gatewayV2 := &gatewayv2alpha1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: gatewayV1.Name, Namespace: gatewayV1.Namespace}}
-			err := convertGateway(&gatewayV1, gatewayV2, repository)
+			err := i.convertGateway(ctx, &gatewayV1, gatewayV2, repository)
 			if err != nil {
 				klog.Errorf("failed to convert gateway %s/%s: %v", gatewayV1.Namespace, gatewayV1.Name, err)
 				return err
@@ -731,25 +733,45 @@ func (i *upgradeJob) upgradeGateway(ctx context.Context, gatewayName string) err
 	return nil
 }
 
-func convertGateway(gatewayV1 *gatewayv1alpha1.Gateway, gatewayV2 *gatewayv2alpha1.Gateway, repository string) (err error) {
+func (i *upgradeJob) convertGateway(ctx context.Context, gatewayV1 *gatewayv1alpha1.Gateway, gatewayV2 *gatewayv2alpha1.Gateway, repository string) (err error) {
+	gatewayV1.Spec.Controller.FullnameOverride = gatewayV1.Name
+	gatewayV1.Spec.Controller.Repository = repository
 
 	// check if the gateway is cluster gateway
 	if gatewayV1.Labels[labelGatewayType] == gatewayTypeCluster {
+		gatewayV1.Spec.Controller.FullnameOverride = newClusterGatewayName
 		gatewayV2.Name = newClusterGatewayName
 	}
-
-	if gatewayV1.Spec.Controller.Annotations == nil {
-		gatewayV1.Spec.Controller.Annotations = map[string]string{}
-	}
-	gatewayV1.Spec.Controller.Annotations["fullnameoverride"] = gatewayV2.Name
-	gatewayV1.Spec.Controller.Annotations["repository"] = repository
-
 	jsonBytes, err := templateHandler(&gatewayV1.Spec)
 	if err != nil {
 		return err
 	}
 
 	gatewayV2.Labels = gatewayV1.Labels
+
+	if gatewayV2.Labels == nil {
+		gatewayV2.Labels = make(map[string]string)
+	}
+
+	gatewayType := "project"
+	if gatewayV1.Name == oldClusterGatewayName {
+		gatewayType = "cluster"
+	}
+
+	gatewayV2.Labels[labelGatewayType] = gatewayType
+
+	if gatewayType == "project" {
+		ns := strings.ReplaceAll(gatewayV1.Name, kubesphereRouterPrefix, "")
+		targetNs := &v1.Namespace{}
+		if err := i.clientV4.Get(ctx, types.NamespacedName{Name: ns, Namespace: KubeSphereNamespace}, targetNs); err != nil {
+			klog.Errorf("failed to get namespace %s: %v", ns, err)
+			return err
+		}
+		if ws := targetNs.Labels[constants.WorkspaceLabelKey]; ws != "" {
+			gatewayV2.Labels[constants.WorkspaceLabelKey] = ws
+		}
+	}
+
 	gatewayV2.Annotations = gatewayV1.Annotations
 	gatewayV2.Spec.AppVersion = appVersion
 	gatewayV2.Spec.Values = pkgruntime.RawExtension{
