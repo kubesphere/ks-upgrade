@@ -1,0 +1,17 @@
+spec:
+  monitoring:
+    prometheus:
+      volumeSize: 100Gi
+    whizard:
+      enabled: true
+      client:
+        gatewayUrl: http://192.168.1.1:30990
+    process_exporter:
+      enabled: false
+    calico_exporter:
+      enabled: true
+
+  etcd:
+    monitoring: true
+    endpointIps: 192.168.2.1,192.168.2.2
+    tlsEnable: true

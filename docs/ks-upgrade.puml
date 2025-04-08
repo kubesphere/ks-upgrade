@@ -1,0 +1,33 @@
+@startuml
+actor       User
+participant Helm
+participant "ks-core"
+participant "ks-upgrade"
+participant PluginJobs
+participant Kubernetes
+participant Store
+
+autonumber
+
+User --> Helm: Helm template oci:xxx | kubectl create -f - \n导入扩展组件到集群中
+note over "ks-upgrade", Store #LightBlue: ks-upgrade生命周期
+User --> "ks-upgrade" ++ #005500: prepare-upgrade\n升级前准备操作
+"ks-upgrade" --> "ks-core" --: 将deploy副本调整为0
+User --> "Helm": helm show crds  $chart | kubectl apply -f - \n更新4.0 CRD
+User --> Helm: Helm upgrade ks-core
+Helm --> "ks-upgrade" ++ #005500: 触发 Helm Hook 事件: pre-upgrade
+"ks-upgrade" --> PluginJobs : 执行插件升级前的逻辑: 数据备份,资源清理
+PluginJobs --> Kubernetes: 查询插件配置数据
+PluginJobs --> Store : 持久化插件配置数据
+"ks-upgrade" <-- PluginJobs: 备份/清理完成
+"ks-upgrade" --> Helm --: pre-upgrade完成
+Helm --> "ks-core": Helm upgrade: 升级 ks-core 资源
+Helm --> "ks-upgrade" ++ #005500: 触发 Helm Hook 事件: post-upgrade
+"ks-upgrade" <-- Store: 获取插件配置数据
+"ks-upgrade" --> PluginJobs: 执行插件升级后的逻辑: 创建 InstallPlan
+"ks-upgrade" --> "ks-core" --: ks-core插件安装
+"ks-core" --> "ks-core": 安装插件
+"ks-core" --> Helm: Helm 升级完成
+
+
+@enduml
