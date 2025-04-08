@@ -129,10 +129,6 @@ func (j *upgradeJob) RemoveKubeFedResources(ctx context.Context) error {
 		return err
 	}
 
-	if needScale {
-		return j.scaleDeployment(ctx, KubeFedNamespace, "kubefed-controller-manager", 1)
-	}
-
 	return nil
 }
 

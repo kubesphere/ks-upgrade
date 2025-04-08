@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	schemev4 "kubesphere.io/ks-upgrade/v4/scheme"
 	"mime"
 	"net/http"
 	"path"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"strings"
 	"time"
 
@@ -52,6 +54,7 @@ var (
 
 	ExtensionConfigMapKey        = "chart.tgz"
 	ExtensionConfigMapNameFormat = "extension-%s-%s-chart"
+	ExtensionURLFmt              = "https://extensions-museum.kubesphere-system.svc/charts/%s-%s.tgz"
 )
 
 type Helper interface {
@@ -62,10 +65,12 @@ type Helper interface {
 	IsHostCluster(ctx context.Context) (bool, error)
 	GetClusterConfiguration(ctx context.Context) (map[string]interface{}, error)
 	GetChartDownloader() *download.ChartDownloader
+	SyncHelmChart(ctx context.Context, extensionRef *model.ExtensionRef) error
 	GenerateClusterScheduling(ctx context.Context, extensionRef *model.ExtensionRef, isEnabledFunc func(cc map[string]any) (bool, error),
 		convertConfigFunc func(cc map[string]any) (map[string]any, error)) error
 	GetSpecifiedClusterConfiguration(ctx context.Context, cluster v4clusterv1alpha1.Cluster) (map[string]interface{}, error)
 	NewRuntimeClientV3(kubeconfig []byte) (runtimeclient.Client, error)
+	NewRuntimeClientV4(kubeconfig []byte) (runtimeclient.Client, error)
 	PluginEnabled(ctx context.Context, kubeconfig []byte, paths ...string) (bool, error)
 }
 
@@ -185,13 +190,24 @@ func (c *coreHelper) GetChartDownloader() *download.ChartDownloader {
 // Refer to https://github.com/kubernetes/kubernetes/blob/release-1.27/staging/src/k8s.io/kubectl/pkg/cmd/apply/apply.go#L563
 func (c *coreHelper) ApplyCRDsFromExtensionRef(ctx context.Context, extensionRef *model.ExtensionRef,
 	options metav1.ApplyOptions, ignore func(apiextensionsv1.CustomResourceDefinition) bool) error {
+
 	var chartBuf *bytes.Buffer
 	var err error
 	chartURL := fmt.Sprintf("https://extensions-museum.kubesphere-system.svc/charts/%s-%s.tgz", extensionRef.Name, extensionRef.Version)
 	chartBuf, err = c.chartDownloader.Download(chartURL)
 	if err != nil {
-		klog.Errorf("failed to download chart %s: %s", chartURL, err)
-		return err
+		klog.V(2).Info("failed to download chart, try to get from configmap")
+		cm := v1.ConfigMap{}
+		cm.Name = fmt.Sprintf(ExtensionConfigMapNameFormat, extensionRef.Name, extensionRef.Version)
+		err = c.clientV4.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: KubeSphereNamespace}, &cm)
+		if err != nil {
+			return fmt.Errorf("failed to get configmap %s/%s, err: %s", cm.Namespace, cm.Name, err)
+		}
+		chartBytes, ok := cm.BinaryData[ExtensionConfigMapKey]
+		if !ok {
+			return fmt.Errorf("failed to get chart data from configmap %s", cm.Name)
+		}
+		chartBuf = bytes.NewBuffer(chartBytes)
 	}
 
 	chart, err := loader.LoadArchive(chartBuf)
@@ -360,6 +376,24 @@ func (c *coreHelper) NewRuntimeClientV3(kubeconfig []byte) (runtimeclient.Client
 	})
 }
 
+func (c *coreHelper) NewRuntimeClientV4(kubeconfig []byte) (runtimeclient.Client, error) {
+	clientConfig, err := clientcmd.NewClientConfigFromBytes(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	restConfig, err := clientConfig.ClientConfig()
+	if err != nil {
+		return nil, err
+	}
+	v4Schema := runtime.NewScheme()
+	if err = schemev4.AddToScheme(v4Schema); err != nil {
+		return nil, fmt.Errorf("failed to register scheme v4: %s", err)
+	}
+	return runtimeclient.New(restConfig, runtimeclient.Options{
+		Scheme: v4Schema,
+	})
+}
+
 func (c *coreHelper) PluginEnabled(ctx context.Context, kubeconfig []byte, paths ...string) (bool, error) {
 	var client *dynamic.DynamicClient
 	if kubeconfig != nil {
@@ -427,4 +461,46 @@ func LoadExtensionSpec(chartBuf []byte) (*corev1alpha1.ExtensionVersionSpec, err
 		}
 	}
 	return &spec, nil
+}
+
+func (c *coreHelper) SyncHelmChart(ctx context.Context, extensionRef *model.ExtensionRef) error {
+	isHostCluster, err := c.IsHostCluster(ctx)
+	if err != nil {
+		return err
+	}
+	if !isHostCluster {
+		klog.Infof("skip sync helm chart to member cluster")
+		return nil
+	}
+
+	chartURL := fmt.Sprintf(ExtensionURLFmt, extensionRef.Name, extensionRef.Version)
+	chartData, err := c.chartDownloader.Download(chartURL)
+	if err != nil {
+		klog.Errorf("failed to download chart %s: %s", chartURL, err)
+		return err
+	}
+
+	clusters := &v4clusterv1alpha1.ClusterList{}
+	if err := c.ListCluster(ctx, clusters); err != nil {
+		return err
+	}
+	for _, cluster := range clusters.Items {
+		clusterClient, err := c.NewRuntimeClientV4(cluster.Spec.Connection.KubeConfig)
+		if err != nil {
+			return err
+		}
+		configMap := v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf(ExtensionConfigMapNameFormat, extensionRef.Name, extensionRef.Version),
+				Namespace: KubeSphereNamespace,
+			},
+		}
+		op, err := controllerruntime.CreateOrUpdate(ctx, clusterClient, &configMap, func() error {
+			configMap.BinaryData = map[string][]byte{ExtensionConfigMapKey: chartData.Bytes()}
+			return nil
+		})
+		klog.Infof("op: %s, cluster: %s, configMap: %s", op, cluster.Name, configMap.Name)
+	}
+
+	return nil
 }

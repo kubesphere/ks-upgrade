@@ -292,8 +292,9 @@ func (j *upgradeJob) DataMigration(ctx context.Context) error {
 
 		for _, item := range items {
 			upgraded := upFunc(item.(client.Object))
-			deepCopy := upgraded.DeepCopyObject().(client.Object)
-			err = j.clientV4.Get(ctx, types.NamespacedName{Namespace: deepCopy.GetNamespace(), Name: deepCopy.GetName()}, deepCopy)
+			copyObject := upgraded.DeepCopyObject().(client.Object)
+			klog.Infof("resource migration in process: %+v", upgraded)
+			err = j.clientV4.Get(ctx, types.NamespacedName{Namespace: upgraded.GetNamespace(), Name: upgraded.GetName()}, copyObject)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}

@@ -881,6 +881,9 @@ func (i *upgradeJob) patchUpgradeJobPv(ctx context.Context) error {
 		Namespace: constants.KubeSphereNamespace,
 		Name:      preUpgradeJobName,
 	}, &job, &runtimeclient.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 	if job.Spec.Template.Spec.Volumes == nil {
@@ -927,7 +930,8 @@ func (i *upgradeJob) patchUpgradeJobPv(ctx context.Context) error {
 				deployCopy.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
 				klog.Infof("Patch pv %s PersistentVolumeReclaimPolicy to %s", pvcName, corev1.PersistentVolumeReclaimRetain)
 				if err := i.clientV3.Patch(ctx, deployCopy, runtimeclient.MergeFrom(&pv), &runtimeclient.PatchOptions{}); err != nil {
-					return err
+					klog.Warningf("Patch upgrade job pv %s failed", pvcName)
+					return nil
 				}
 				klog.Infof("Patch pv %s PersistentVolumeReclaimPolicy to %s", pvcName, corev1.PersistentVolumeReclaimRetain)
 			} else {
