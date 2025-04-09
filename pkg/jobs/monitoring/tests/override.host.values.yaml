@@ -1,0 +1,13 @@
+whizard-monitoring-helper:
+  etcdMonitoringHelper:
+    enabled: true
+
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      secrets: []
+  kubeEtcd:
+    enabled: true
+    endpoints:
+    - 192.168.1.1
+    - 192.168.1.2

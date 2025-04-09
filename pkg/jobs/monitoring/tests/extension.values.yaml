@@ -1,0 +1,65 @@
+whizardMonitoringHelper:
+  enabled: true
+
+whizard-monitoring-helper:
+  whizardHelper:
+    enabled: true
+
+whizardAgentProxy:
+  enabled: true
+
+whizard-agent-proxy:
+  config:
+    gatewayUrl: http://192.168.1.1:30990
+
+whizard:
+  enabled: true  
+
+  service:
+    compactorTemplateSpec:
+      dataVolume:
+        persistentVolumeClaim:
+          spec:
+            resources:
+              requests:
+                storage: 20Gi
+
+    ingesterTemplateSpec:
+      dataVolume:
+        persistentVolumeClaim:
+          spec:
+            resources:
+              requests:
+                storage: 20Gi
+
+    storeTemplateSpec:
+      dataVolume:
+        persistentVolumeClaim:
+          spec:
+            resources:
+              requests:
+                storage: 20Gi
+
+kube-prometheus-stack:
+  prometheus:
+    agentMode: true
+    prometheusSpec:
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi
+        requests:
+          cpu: 200m
+          memory: 400Mi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 30Gi
+
+  prometheus-node-exporter:
+    ProcessExporter:
+      enabled: true
+    CalicoExporter:
+      enabled: true

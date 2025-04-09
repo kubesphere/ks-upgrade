@@ -1,0 +1,61 @@
+upgrade:
+  enabled: true
+  image:
+    registry: ""
+    repository: kubesphere/ks-upgrade
+    tag: ""
+    pullPolicy: Always
+  config:
+    storage:
+      local:
+        path: /tmp/ks-upgrade
+    jobs:
+      core:
+        enabled: true
+        priority: 10000
+      iam:
+        enabled: true
+        priority: 999
+      network:
+        enabled: false
+      devops:
+        enabled: false
+      storage-utils:
+        enabled: false
+        priority: 100
+      tower:
+        enabled: false
+      kubefed:
+        enabled: false
+      whizard-monitoring:
+        enabled: false
+      springcloud:
+        enabled: false
+      servicemesh:
+        enabled: false
+      application:
+        enabled: false
+      dmp:
+        enabled: false
+      whizard-notification:
+        enabled: false
+      whizard-alerting:
+        enabled: false
+      kubeedge:
+        enabled: false
+      whizard-events:
+        enabled: false
+      gateway:
+        enabled: false
+      whizard-auditing:
+        enabled: false
+      whizard-logging:
+        enabled: false
+      vector:
+        enabled: false
+      opensearch:
+        enabled: false
+      whizard-telemetry:
+        enabled: false
+      metrics-server:
+        enabled: false

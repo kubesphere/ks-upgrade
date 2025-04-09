@@ -1,0 +1,15 @@
+spec:
+  monitoring:
+    prometheus:
+      volumeSize: 30Gi
+    whizard:
+      enabled: true
+    process_exporter:
+      enabled: true
+    calico_exporter:
+      enabled: true
+
+  etcd:
+    monitoring: true
+    endpointIps: 192.168.1.1,192.168.1.2
+    tlsEnable: false

@@ -1,0 +1,25 @@
+whizard-monitoring-helper:
+  etcdMonitoringHelper:
+    enabled: true
+
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 100Gi
+      secrets:
+      - kube-etcd-client-certs
+
+  prometheus-node-exporter:
+    ProcessExporter:
+      enabled: false
+
+  kubeEtcd:
+    enabled: true
+    endpoints:
+    - 192.168.2.1
+    - 192.168.2.2
