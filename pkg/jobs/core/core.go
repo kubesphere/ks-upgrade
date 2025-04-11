@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -116,6 +115,10 @@ func (i *upgradeJob) PrepareUpgrade(ctx context.Context) error {
 		return errors.Errorf("failed to remove namespace owner reference: %s", err)
 	}
 
+	if err := i.deleteKubeSphereWebhook(ctx); err != nil {
+		return errors.Errorf("failed to delete kubesphere webhook: %s", err)
+	}
+
 	if err := i.refreshHostClusterKubeConfig(ctx); err != nil {
 		return errors.Errorf("failed to refresh host cluster kubeconfig: %s", err)
 	}
@@ -166,11 +169,6 @@ func (i *upgradeJob) PreUpgrade(ctx context.Context) error {
 
 	klog.Info("updating member clusters")
 	if err := i.updateMemberClusters(ctx); err != nil {
-		return err
-	}
-
-	klog.Info("start to delete kubesphere webhooks")
-	if err := i.deleteKubeSphereWebhook(ctx); err != nil {
 		return err
 	}
 
@@ -354,11 +352,7 @@ func (i *upgradeJob) refreshHostClusterKubeConfig(ctx context.Context) error {
 			return err
 		}
 		for _, cluster := range clusters.Items {
-			labels := cluster.GetLabels()
-			if labels == nil {
-				continue
-			}
-			if _, ok := labels[hostClusterLabel]; ok {
+			if _, ok := cluster.GetLabels()[hostClusterLabel]; ok {
 				restConfig, err := restconfig.GetConfig()
 				if err != nil {
 					return err
@@ -413,13 +407,9 @@ func (i *upgradeJob) refreshHostClusterKubeConfig(ctx context.Context) error {
 }
 
 func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
-	var validatingWebhooksBackupCount = 0
-	var validatingWebhooksDeleteCount = 0
 	var validatingWebhooksBackup = admissionregistrationv1.ValidatingWebhookConfigurationList{
 		Items: make([]admissionregistrationv1.ValidatingWebhookConfiguration, 0),
 	}
-	var mutatingWebhooksBackupCount = 0
-	var mutatingWebhooksDeleteCount = 0
 	var mutatingWebhooksBackup = admissionregistrationv1.MutatingWebhookConfigurationList{
 		Items: make([]admissionregistrationv1.MutatingWebhookConfiguration, 0),
 	}
@@ -434,10 +424,11 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			return err
 		}
 
-		for _, validatingWebhook := range validatingWebhooks.Items {
-			if validatingWebhook.Name == "validator.config.kubesphere.io" {
-				validatingWebhooksBackup.Items = append(validatingWebhooksBackup.Items, validatingWebhook)
-				validatingWebhooksBackupCount += 1
+		for _, webhook := range validatingWebhooks.Items {
+			if len(webhook.Webhooks) > 0 &&
+				webhook.Webhooks[0].ClientConfig.Service.Name == "ks-controller-manager" &&
+				webhook.Webhooks[0].ClientConfig.Service.Namespace == constants.KubeSphereNamespace {
+				validatingWebhooksBackup.Items = append(validatingWebhooksBackup.Items, webhook)
 			}
 		}
 
@@ -457,10 +448,11 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			return err
 		}
 
-		for _, mutatingWebhook := range mutatingWebhooks.Items {
-			if strings.HasSuffix(mutatingWebhook.Name, ".iam.kubesphere.io") {
-				mutatingWebhooksBackup.Items = append(mutatingWebhooksBackup.Items, mutatingWebhook)
-				mutatingWebhooksBackupCount += 1
+		for _, webhook := range mutatingWebhooks.Items {
+			if len(webhook.Webhooks) > 0 &&
+				webhook.Webhooks[0].ClientConfig.Service.Name == "ks-controller-manager" &&
+				webhook.Webhooks[0].ClientConfig.Service.Namespace == constants.KubeSphereNamespace {
+				mutatingWebhooks.Items = append(mutatingWebhooks.Items, webhook)
 			}
 		}
 
@@ -477,12 +469,12 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			}
 		}
 		if len(validatingWebhook.GetFinalizers()) > 0 {
-			mutatingWebhookCopy := validatingWebhook.DeepCopy()
+			webhook := validatingWebhook.DeepCopy()
 			now := metav1.Now()
-			mutatingWebhookCopy.SetDeletionTimestamp(&now)
-			mutatingWebhookCopy.SetFinalizers(make([]string, 0))
+			webhook.SetDeletionTimestamp(&now)
+			webhook.SetFinalizers(make([]string, 0))
 			klog.Infof("Delete ValidatingWebhookConfiguration %s", validatingWebhook.Name)
-			if err := i.clientV3.Patch(ctx, mutatingWebhookCopy, runtimeclient.MergeFrom(&validatingWebhook), &runtimeclient.PatchOptions{}); err != nil {
+			if err := i.clientV3.Patch(ctx, webhook, runtimeclient.MergeFrom(&validatingWebhook), &runtimeclient.PatchOptions{}); err != nil {
 				return err
 			}
 		}
@@ -490,7 +482,6 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			return err
 		}
 		klog.Infof("Delete ValidatingWebhookConfiguration %s", validatingWebhook.Name)
-		validatingWebhooksDeleteCount += 1
 	}
 
 	// Delete MutatingWebhookConfiguration
@@ -501,12 +492,12 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			}
 		}
 		if len(mutatingWebhook.GetFinalizers()) > 0 {
-			mutatingWebhookCopy := mutatingWebhook.DeepCopy()
+			webhook := mutatingWebhook.DeepCopy()
 			now := metav1.Now()
-			mutatingWebhookCopy.SetDeletionTimestamp(&now)
-			mutatingWebhookCopy.SetFinalizers(make([]string, 0))
+			webhook.SetDeletionTimestamp(&now)
+			webhook.SetFinalizers(make([]string, 0))
 			klog.Infof("Delete MutatingWebhookConfiguration %s", mutatingWebhook.Name)
-			if err := i.clientV3.Patch(ctx, mutatingWebhookCopy, runtimeclient.MergeFrom(&mutatingWebhook), &runtimeclient.PatchOptions{}); err != nil {
+			if err := i.clientV3.Patch(ctx, webhook, runtimeclient.MergeFrom(&mutatingWebhook), &runtimeclient.PatchOptions{}); err != nil {
 				return err
 			}
 		}
@@ -514,12 +505,9 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 			return err
 		}
 		klog.Infof("Delete MutatingWebhookConfiguration %s", mutatingWebhook.Name)
-		mutatingWebhooksDeleteCount += 1
 	}
-	klog.Infof("Backup %d ValidatingWebhookConfiguration", validatingWebhooksBackupCount)
-	klog.Infof("Backup %d MutatingWebhookConfiguration", mutatingWebhooksBackupCount)
-	klog.Infof("Delete %d ValidatingWebhookConfiguration", validatingWebhooksDeleteCount)
-	klog.Infof("Delete %d MutatingWebhookConfiguration", mutatingWebhooksDeleteCount)
+	klog.Infof("Delete %d ValidatingWebhookConfiguration", len(validatingWebhooksBackup.Items))
+	klog.Infof("Delete %d MutatingWebhookConfiguration", len(mutatingWebhooksBackup.Items))
 	return nil
 }
 
@@ -1013,8 +1001,10 @@ func (i *upgradeJob) UpdateNamespaceLabels(ctx context.Context) error {
 		return err
 	}
 	for _, item := range nsList.Items {
-		err = addLabels(i.clientV3, ctx, &item, map[string]string{"kubesphere.io/managed": "true"})
-		if err != nil {
+		if item.Labels["kubesphere.io/devopsproject"] != "" {
+			continue
+		}
+		if err = addLabels(i.clientV3, ctx, &item, map[string]string{"kubesphere.io/managed": "true"}); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add labels to namespace %s, %s", item.Name, err))
 		}
 		klog.Info(fmt.Sprintf("add labels to namespace %s successfully", item.Name))

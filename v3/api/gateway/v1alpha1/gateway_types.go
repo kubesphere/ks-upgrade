@@ -30,15 +30,22 @@ type GatewaySpec struct {
 }
 
 type ControllerSpec struct {
-	WorkingNamespace string `json:"workingNamespace"`
+	FullnameOverride string `json:"-"`
+	Repository       string `json:"-"`
+	// Deprecated: Use Deployment Replicas instead
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
+	// Deprecated: Use Deployment Annotations instead
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
 	// +optional
 	Scope Scope `json:"scope,omitempty"`
+	// +optional
+	TCP map[string]string `json:"tcp,omitempty"`
+	// +optional
+	UDP map[string]string `json:"udp,omitempty"`
 }
 
 type ServiceSpec struct {
@@ -54,9 +61,11 @@ type DeploymentSpec struct {
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 	// +optional
-	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
-	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// +optional
+	Affinity corev1.Affinity `json:"affinity,omitempty"`
 }
 
 type Scope struct {
