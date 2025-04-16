@@ -29,17 +29,18 @@ const (
 	PvcName       = "devops-jenkins"
 	LegacyPvcName = "ks-jenkins"
 
-	HelmReleaseFmt  = "%s-%s-%s-release"
-	HelmValuesFmt   = "%s-%s-%s-values"
-	PvFmt           = "%s-%s-pv"
-	PvcFmt          = "%s-%s-pvc"
-	DeploymentsFmt  = "%s-%s-deployments"
-	ConfigmapsFmt   = "%s-%s-configmaps"
-	ProjectsFmt     = "%s-devops-projects"
-	PipelinesFmt    = "%s-devops-pipelines"
-	PipelineRunsFmt = "%s-devops-pipelineruns"
-	GitReposFmt     = "%s-devops-gitrepos"
-	CredListFmt     = "%s-devops-secrets"
+	HelmReleaseFmt      = "%s-%s-%s-release"
+	HelmValuesFmt       = "%s-%s-%s-values"
+	PvFmt               = "%s-%s-pv"
+	PvcFmt              = "%s-%s-pvc"
+	DeploymentsFmt      = "%s-%s-deployments"
+	ConfigmapsFmt       = "%s-%s-configmaps"
+	SecretDevOpsJenkins = "%s-secret-devops-jenkins"
+	ProjectsFmt         = "%s-devops-projects"
+	PipelinesFmt        = "%s-devops-pipelines"
+	PipelineRunsFmt     = "%s-devops-pipelineruns"
+	GitReposFmt         = "%s-devops-gitrepos"
+	CredListFmt         = "%s-devops-secrets"
 )
 
 type backup struct {
@@ -117,6 +118,12 @@ func (b *backup) backupClusterResources(ctx context.Context) (err error) {
 	// 5. save pv and pvc(ks-jenkins or devops-jenkins)
 	klog.Info("save devops-jenkins pv and pvc..")
 	if _, err = b.backupJenkinsPvc(ctx, b.cluster); err != nil {
+		return
+	}
+
+	// 5. save pv and pvc(ks-jenkins or devops-jenkins)
+	klog.Info("save devops-jenkins secret")
+	if err = b.backupObj(ctx, SysNs, "devops-jenkins", fmt.Sprintf(SecretDevOpsJenkins, b.cluster), &corev1.Secret{}); err != nil {
 		return
 	}
 

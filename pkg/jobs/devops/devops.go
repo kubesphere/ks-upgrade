@@ -20,10 +20,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
-
 	"kubesphere.io/ks-upgrade/pkg/executor"
 	"kubesphere.io/ks-upgrade/pkg/helm"
 	"kubesphere.io/ks-upgrade/pkg/model"
@@ -34,6 +32,9 @@ import (
 	v3apicluster "kubesphere.io/ks-upgrade/v3/api/cluster/v1alpha1"
 	devopsv1alpha3 "kubesphere.io/ks-upgrade/v3/api/devops/v1alpha3"
 	v4apicore "kubesphere.io/ks-upgrade/v4/api/core/v1alpha1"
+	v4corev1alpha1 "kubesphere.io/ks-upgrade/v4/api/core/v1alpha1"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 )
 
 func init() {
@@ -429,21 +430,11 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 		return
 	}
 
-	// 2. check if DevOps enabled in current cluster
-	var enabled bool
-	if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
-		klog.Errorf("check DevOps enabled error: %+v", err)
-		return
-	}
-	if !enabled {
-		klog.Warning("the DevOps is not enabled in current cluster, ignore")
-		return
-	}
-
-	// 3. parse j.inClusterConfig and j.inClusterOverrides from 3.5.x if isHostCluster
+	// 3. parse j.inClusterConfig and j.inClusterOverrides from 3.x if isHostCluster
 	if j.isHostCluster, err = j.coreHelper.IsHostCluster(ctx); err != nil {
 		return
 	}
+
 	if j.isHostCluster {
 		j.inClusterConfig = new(Config)
 		j.inClusterOverrides = map[string]*Override{}
@@ -496,6 +487,17 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 		}
 	}
 
+	// check if DevOps enabled in current cluster
+	var enabled bool
+	if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
+		klog.Errorf("check DevOps enabled error: %+v", err)
+		return
+	}
+	if !enabled {
+		klog.Warning("the DevOps is not enabled in current cluster, ignore")
+		return
+	}
+
 	// 5. update labels of DevOpsProjects namespace
 	klog.Infof("update labels of DevOpsProjects namespace ..")
 	projects := &devopsv1alpha3.DevOpsProjectList{}
@@ -503,19 +505,16 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 		klog.Errorf("list devops-projects error: %+v", err)
 		return
 	}
-	var projNs *corev1.Namespace
-	objKey := types.NamespacedName{}
 	for _, proj := range projects.Items {
-		projNs = &corev1.Namespace{}
-		objKey.Name = proj.Name
-		if err = j.clientV4.Get(ctx, objKey, projNs); err != nil {
+		projNs := &corev1.Namespace{}
+		if err = j.clientV4.Get(ctx, types.NamespacedName{Name: proj.Name}, projNs); err != nil {
 			klog.Errorf("get namespace of devops-project %s error: %+v", proj.Name, err)
 			return
 		}
-		_, ok1 := projNs.Labels[ManagedKey]
-		_, ok2 := projNs.Labels[WorkspaceKey]
-		if !ok1 || !ok2 {
-			klog.Infof("update namespace %s labels", proj.Name)
+		_, managedByDevOpsExtension := projNs.Labels[ManagedKey]
+		_, managedByWorkspace := projNs.Labels[WorkspaceKey]
+		if !managedByDevOpsExtension || !managedByWorkspace {
+			klog.Infof("update namespace %s", projNs.Name)
 			projNs.Labels[ManagedKey] = ManagedTrue
 			projNs.Labels[WorkspaceKey] = proj.Labels[WorkspaceKey]
 			if err = j.clientV4.Update(ctx, projNs); err != nil {
@@ -603,29 +602,38 @@ func (j *upgradeJob) parseArgocdValues(cluster v3apicluster.Cluster) (err error)
 	if argocdValues, err = j.resourceStore.LoadRaw(fmt.Sprintf(HelmValuesFmt, cluster.Name, ArgoNs, ArgoCDRelease)); err != nil {
 		return
 	}
-	argocd := new(ArgoOptions)
+	argocd := &ArgoOptions{}
 	if err = json.Unmarshal(argocdValues, argocd); err != nil {
 		return
 	}
 	argocd.cleanImageNil()
 
-	// update resources.limit of argocd.Dex for starting failed
-	if strings.HasSuffix(argocd.Dex.Resources.Limits.Memory, "Mi") {
-		var dexMem int
-		if dexMem, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Memory, "Mi")); err != nil {
-			return
+	if argocd.Dex.Resources == nil || argocd.Dex.Resources.Limits == nil {
+		argocd.Dex.Resources = &ResourceRequirements{
+			Limits: &Resource{
+				Memory: "1024Mi",
+				Cpu:    "500m",
+			},
 		}
-		if dexMem < 1024 {
-			argocd.Dex.Resources.Limits.Memory = "1024Mi"
+	} else {
+		// update resources.limit of argocd.Dex for starting failed
+		if strings.HasSuffix(argocd.Dex.Resources.Limits.Memory, "Mi") {
+			var dexMem int
+			if dexMem, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Memory, "Mi")); err != nil {
+				return
+			}
+			if dexMem < 1024 {
+				argocd.Dex.Resources.Limits.Memory = "1024Mi"
+			}
 		}
-	}
-	if strings.HasSuffix(argocd.Dex.Resources.Limits.Cpu, "m") {
-		var dexCpu int
-		if dexCpu, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Cpu, "m")); err != nil {
-			return
-		}
-		if dexCpu < 500 {
-			argocd.Dex.Resources.Limits.Cpu = "500m"
+		if strings.HasSuffix(argocd.Dex.Resources.Limits.Cpu, "m") {
+			var dexCpu int
+			if dexCpu, err = strconv.Atoi(strings.TrimSuffix(argocd.Dex.Resources.Limits.Cpu, "m")); err != nil {
+				return
+			}
+			if dexCpu < 500 {
+				argocd.Dex.Resources.Limits.Cpu = "500m"
+			}
 		}
 	}
 
@@ -643,6 +651,7 @@ func (j *upgradeJob) parseJenkinsValues(cluster v3apicluster.Cluster) (err error
 	if err = j.resourceStore.Load(fmt.Sprintf(PvFmt, cluster.Name, JenkinsWorkload), pv); err != nil {
 		return
 	}
+
 	jenkinsConfig.Persistence = &Persistence{ExistingClaim: pv.Spec.ClaimRef.Name}
 
 	// 2. setup jenkins master resources and envs
@@ -695,6 +704,12 @@ func (j *upgradeJob) parseJenkinsValues(cluster v3apicluster.Cluster) (err error
 	}
 	if jenkinsConfig.Master == nil {
 		return errors.New("failed to setup devops-jenkins master")
+	}
+
+	secret := &corev1.Secret{}
+	_ = j.resourceStore.Load(fmt.Sprintf(SecretDevOpsJenkins, cluster.Name), secret)
+	if jenkinsAdminPassword, ok := secret.Data["jenkins-admin-password"]; ok && len(jenkinsAdminPassword) > 0 {
+		jenkinsConfig.Master.AdminPassword = string(jenkinsAdminPassword)
 	}
 
 	// 3. setup ServiceType of devops-jenkins
@@ -777,7 +792,22 @@ func (j *upgradeJob) install(ctx context.Context) (err error) {
 		extensionRefBytes, _ := yaml.Marshal(j.extensionRef)
 		klog.V(4).Infof("extensionRef: \n%s", extensionRefBytes)
 	}
-	return j.coreHelper.CreateInstallPlanFromExtensionRef(ctx, j.extensionRef)
+
+	watchFuncs := func() (context.Context, time.Duration, time.Duration, wait.ConditionWithContextFunc) {
+		return ctx, time.Second * 2, time.Minute * 10, func(ctx context.Context) (done bool, err error) {
+			ext := v4corev1alpha1.InstallPlan{}
+			if err := j.clientV4.Get(ctx, types.NamespacedName{Name: j.extensionRef.Name}, &ext, &runtimeclient.GetOptions{}); err != nil {
+				return false, fmt.Errorf("get InstallPlan error: %w", err)
+			}
+			klog.Infof("CreateInstallPlanFromExtensionRef object, %v", ext)
+			if ext.Status.State == v4corev1alpha1.StateDeployed {
+				return true, nil
+			}
+			return false, nil
+		}
+	}
+
+	return j.coreHelper.CreateInstallPlanFromExtensionRef(ctx, j.extensionRef, watchFuncs)
 }
 
 func isHostCluster(cluster v3apicluster.Cluster) bool {

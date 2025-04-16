@@ -122,7 +122,7 @@ type StoreOption struct {
 }
 
 func (j *upgradeJob) PreUpgrade(ctx context.Context) error {
-	status, err := j.GetUpgradeStatus()
+	status, err := j.GetUpgradeStatus("pre-upgrade")
 	if err != nil {
 		return err
 	}
@@ -183,11 +183,11 @@ func (j *upgradeJob) PreUpgrade(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return nil
+	return j.SetUpgradeStatus("pre-upgrade", UpgradeStatusSuccess)
 }
 
 func (j *upgradeJob) PrepareUpgrade(ctx context.Context) error {
-	status, err := j.GetUpgradeStatus()
+	status, err := j.GetUpgradeStatus("prepare-upgrade")
 	if err != nil {
 		return err
 	}
@@ -195,18 +195,17 @@ func (j *upgradeJob) PrepareUpgrade(ctx context.Context) error {
 		j.logger.Info("iam has been upgraded successfully, skip job")
 		return nil
 	}
-
 	if err := j.fixHelmManagedResourceAnnotations(ctx); err != nil {
 		return errors.Errorf("failed to fix helm managed resource annotation: %s", err)
 	}
 	if err := j.fixConflictResources(ctx); err != nil {
 		return errors.Errorf("failed to fix conflict resources: %s", err)
 	}
-	return nil
+	return j.SetUpgradeStatus("prepare-upgrade", UpgradeStatusSuccess)
 }
 
 func (j *upgradeJob) PostUpgrade(ctx context.Context) error {
-	status, err := j.GetUpgradeStatus()
+	status, err := j.GetUpgradeStatus("post-upgrade")
 	if err != nil {
 		return err
 	}
@@ -250,7 +249,7 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) error {
 		return err
 	}
 
-	return j.SetUpgradeStatus(UpgradeStatusSuccess)
+	return j.SetUpgradeStatus("post-upgrade", UpgradeStatusSuccess)
 }
 
 func (j *upgradeJob) DeleteRoleTemplates(ctx context.Context) error {
@@ -680,6 +679,7 @@ func (j *upgradeJob) fixHelmManagedResourceAnnotations(ctx context.Context) erro
 
 		j.logger.Info(fmt.Sprintf("fix helm managed resource metadata for %s", key.String()))
 	}
+
 	return nil
 }
 

@@ -95,9 +95,10 @@ type JenkinsOptions struct {
 
 type JenkinsMaster struct {
 	*Workload
-	ServiceType string     `json:"ServiceType,omitempty" yaml:"ServiceType,omitempty"`
-	Smtp        *Smtp      `json:"smtp,omitempty"        yaml:"smtp,omitempty"`
-	Sonarqube   *Sonarqube `json:"sonarqube,omitempty"   yaml:"sonarqube,omitempty"`
+	ServiceType   string     `json:"ServiceType,omitempty" yaml:"ServiceType,omitempty"`
+	Smtp          *Smtp      `json:"smtp,omitempty"        yaml:"smtp,omitempty"`
+	Sonarqube     *Sonarqube `json:"sonarqube,omitempty"   yaml:"sonarqube,omitempty"`
+	AdminPassword string     `json:"AdminPassword,omitempty" yaml:"AdminPassword,omitempty"`
 }
 
 type Smtp struct {

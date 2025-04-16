@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"time"
@@ -81,8 +82,8 @@ type UpgradeStatus struct {
 
 const UpgradeStatusSuccess = "success"
 
-func (j *upgradeJob) GetUpgradeStatus() (*UpgradeStatus, error) {
-	raw, err := j.resourceStore.LoadRaw("iam-upgrade-status")
+func (j *upgradeJob) GetUpgradeStatus(staging string) (*UpgradeStatus, error) {
+	raw, err := j.resourceStore.LoadRaw(fmt.Sprintf("iam-upgrade-status-%s", staging))
 	if err != nil {
 		if errors.Is(err, storage.BackupKeyNotFound) {
 			return &UpgradeStatus{}, nil
@@ -97,13 +98,13 @@ func (j *upgradeJob) GetUpgradeStatus() (*UpgradeStatus, error) {
 	return status, nil
 }
 
-func (j *upgradeJob) SetUpgradeStatus(status string) error {
+func (j *upgradeJob) SetUpgradeStatus(staging, status string) error {
 	upgradeStatus := &UpgradeStatus{
 		Status: status,
 		Time:   time.Now(),
 	}
-	marshal, _ := json.Marshal(upgradeStatus)
-	return j.resourceStore.SaveRaw("iam-upgrade-status", marshal)
+	data, _ := json.Marshal(upgradeStatus)
+	return j.resourceStore.SaveRaw(fmt.Sprintf("iam-upgrade-status-%s", staging), data)
 }
 
 func deleteObjectWithFinalizer(c client.Client, ctx context.Context, object client.Object) error {
