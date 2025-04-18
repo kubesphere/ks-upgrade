@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"kubesphere.io/ks-upgrade/pkg/constants"
 	"strconv"
 	"strings"
 	"text/template"
