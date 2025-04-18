@@ -107,6 +107,10 @@ func (i *upgradeJob) helmReleasesAfter(ctx context.Context) error {
 				klog.Warningf("[Application] helm release %s not found, continue", item.Name)
 				continue
 			}
+			if strings.Contains(err.Error(), "state: draft") {
+				klog.Warningf("[Application] helm release %s app version state: draft, continue", item.Name)
+				continue
+			}
 			klog.Errorf("[Application] failed to create release: %v", err)
 			return err
 		}
