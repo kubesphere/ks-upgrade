@@ -24,11 +24,12 @@ func objectMigration(v4c client.Client, ctx context.Context, upgraded client.Obj
 			if err != nil && (!apierrors.IsNotFound(err) || !isNamespaceTerminating(err)) {
 				return err
 			}
+			klog.Infof("resource created: %+v", upgraded)
 			return nil
 		}
 		return err
 	}
-	klog.Infof("updating %s/%s", upgraded.GetNamespace(), upgraded.GetName())
+	klog.Infof("resouce updated: %+v", upgraded)
 	return v4c.Update(ctx, upgraded)
 }
 

@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"kubesphere.io/ks-upgrade/pkg/constants"
 	"kubesphere.io/ks-upgrade/pkg/executor"
 	"kubesphere.io/ks-upgrade/pkg/helm"
 	"kubesphere.io/ks-upgrade/pkg/model"
@@ -291,6 +292,10 @@ func (i *upgradeJob) PostUpgrade(ctx context.Context) error {
 
 	if err := i.waitForGatewayV2CRD(ctx); err != nil {
 		klog.Fatalf("Error waiting for CRD: %v", err)
+	}
+
+	if err := i.coreHelper.SyncHelmChart(ctx, i.extensionRef); err != nil {
+		return err
 	}
 
 	// save job done time

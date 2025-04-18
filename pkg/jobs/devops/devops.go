@@ -136,48 +136,40 @@ func (j *upgradeJob) InjectHelmClient(client helm.HelmClient) {
 	j.helmClient = client
 }
 
-func (j *upgradeJob) PreUpgrade(ctx context.Context) (err error) {
+func (j *upgradeJob) PreUpgrade(ctx context.Context) error {
 	klog.Info("DevOps PreUpgrade..")
 	// check: if upgrade devops job is done, ignore
 	var done bool
+	var err error
 	if done, err = j.jobDone(); done || err != nil {
-		return
+		return err
 	}
 
-	// 1. check if current cluster enabled devops
-	var enabled bool
-	if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
-		klog.Errorf("check DevOps enabled error: %+v", err)
-		return
-	}
-	if !enabled {
-		klog.Warning("the DevOps is not enabled in current cluster, ignore pre-upgrade")
-		return
-	}
-
-	// 2. backup devops resources for all clusters on host cluster
+	// 1. backup devops resources for all clusters on host cluster
 	if j.isHostCluster, err = j.coreHelper.IsHostCluster(ctx); err != nil {
 		klog.Errorf("check clusterRole error: %+v", err)
-		return
+		return err
 	}
 	if j.isHostCluster {
 		clusters := &v3apicluster.ClusterList{}
 		if err = j.coreHelper.ListCluster(ctx, clusters); err != nil {
-			return
+			return err
 		}
+		var enabled bool
 		if len(clusters.Items) == 0 {
 			// backup with not multiCluster
 			klog.Info("[devops] there is no Cluster found, backup resources of current cluster..")
-			if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
-				return
+			var enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...)
+			if err != nil {
+				return err
 			}
 			if enabled {
 				var bak *backup
 				if bak, err = newBackup("host", nil, j.clientV3, j.coreHelper, j.resourceStore); err != nil {
-					return
+					return err
 				}
 				if err = bak.backupClusterResources(ctx); err != nil {
-					return
+					return err
 				}
 			} else {
 				klog.Warning("the DevOps not enable, ignore backup resource")
@@ -187,17 +179,17 @@ func (j *upgradeJob) PreUpgrade(ctx context.Context) (err error) {
 			for _, cluster := range clusters.Items {
 				klog.Infof("back resources of the cluster %s ..", cluster.Name)
 				if enabled, err = j.coreHelper.PluginEnabled(ctx, cluster.Spec.Connection.KubeConfig, EnabledPaths...); err != nil {
-					return
+					return err
 				}
 				if !enabled {
 					klog.Warningf("the DevOps not enable in cluster %s, ignore backup resource", cluster.Name)
 					continue
 				}
 				if bak, err = newBackup(cluster.Name, cluster.Spec.Connection.KubeConfig, nil, j.coreHelper, j.resourceStore); err != nil {
-					return
+					return err
 				}
 				if err = bak.backupClusterResources(ctx); err != nil {
-					return
+					return err
 				}
 			}
 		}
@@ -205,67 +197,102 @@ func (j *upgradeJob) PreUpgrade(ctx context.Context) (err error) {
 		klog.Warning("the clusterRole is not host, ignore to backup resource.")
 	}
 
+	// 2. check if current cluster enabled devops
+	var enabled bool
+	if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
+		klog.Errorf("check DevOps enabled error: %+v", err)
+		return err
+	}
+	if !enabled {
+		klog.Warning("the DevOps is not enabled in current cluster, ignore pre-upgrade")
+		return nil
+	}
+
 	// 3. backup configmaps(ks-devops-agent/jenkins-casc-config) in current cluster to restore them after install
 	var bak *backup
 	if bak, err = newBackup("current", nil, j.clientV3, j.coreHelper, j.resourceStore); err != nil {
-		return
+		return err
 	}
 	klog.Infof("save configmaps %s and %s of devops..", CascCM, AgentCM)
 	agentCm := &corev1.ConfigMap{}
 	if err = bak.backupObj(ctx, WorkerNs, AgentCM, AgentCM, agentCm); err != nil {
-		return
+		return err
 	}
 	if err = bak.backupConfigmapToCluster(ctx, *agentCm); err != nil {
-		return
+		return err
 	}
 	cascCm := &corev1.ConfigMap{}
 	if err = bak.backupObj(ctx, SysNs, CascCM, CascCM, cascCm); err != nil {
-		return
+		return err
 	}
 	if err = bak.backupConfigmapToCluster(ctx, *cascCm); err != nil {
-		return
+		return err
 	}
 
-	// 4. update pv Reclaim to Retain in current cluster
+	// 4. update labels of DevOpsProjects namespace
+	klog.Infof("update labels of DevOpsProjects namespace ..")
+	projects := &devopsv1alpha3.DevOpsProjectList{}
+	if err = j.clientV3.List(ctx, projects); err != nil {
+		klog.Errorf("list devops-projects error: %+v", err)
+		return err
+	}
+	for _, proj := range projects.Items {
+		projNs := &corev1.Namespace{}
+		if err = j.clientV3.Get(ctx, types.NamespacedName{Name: proj.Name}, projNs); err != nil {
+			klog.Errorf("get namespace of devops-project %s error: %+v", proj.Name, err)
+			return err
+		}
+		_, managedByDevOpsExtension := projNs.Labels[ManagedKey]
+		_, managedByWorkspace := projNs.Labels[WorkspaceKey]
+		if !managedByDevOpsExtension || !managedByWorkspace {
+			klog.Infof("update namespace %s", projNs.Name)
+			projNs.Labels[ManagedKey] = ManagedTrue
+			projNs.Labels[WorkspaceKey] = proj.Labels[WorkspaceKey]
+			if err = j.clientV3.Update(ctx, projNs); err != nil {
+				return err
+			}
+		}
+	}
+
+	// 5. update pv Reclaim to Retain in current cluster
 	klog.Info("update PersistentVolumeReclaimPolicy of devops-jenkins pv to Retain if not..")
 	var pvc *corev1.PersistentVolumeClaim
 	if pvc, err = bak.backupJenkinsPvc(ctx, "current"); err != nil {
 		klog.Errorf("backup of devops-jenkins pvc in current cluster error: %+v", err)
-		return
+		return err
 	}
 	pvName := pvc.Spec.VolumeName
 	pvObjKey := types.NamespacedName{Name: pvName}
 	pv := &corev1.PersistentVolume{}
 	if err = j.clientV3.Get(ctx, pvObjKey, pv); err != nil {
-		return
+		return err
 	}
 	if pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
 		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
 		if err = j.clientV3.Update(ctx, pv); err != nil {
-			return
+			return err
 		}
 		// check if pv Reclaim updated successfully
 		pv = &corev1.PersistentVolume{}
 		if err = j.clientV3.Get(ctx, pvObjKey, pv); err != nil {
-			return
+			return err
 		}
 		if pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
 			err = errors.New("failed to update PersistentVolumeReclaimPolicy of devops-jenkins PV to Retain")
-			return
+			return err
 		}
 	}
 
-	// 5. delete devops and argocd release in current cluster
+	// 6. delete devops and argocd release in current cluster
 	if err = j.uninstall(ctx); err != nil {
 		klog.Errorf("uninstall devops release error: %+v", err)
-		return
+		return err
 	}
 
-	// 6. re-create pvc and bind to the old pv in current cluster to re-use in 4.x..
+	// 7. re-create pvc and bind to the old pv in current cluster to re-use in 4.x..
 	// if the old pvc is managed by devops release, will be deleted when uninstall devops and re-create here;
 	// otherwise, the pvc already exist after uninstall devops and ignore create it.
-	err = j.createNewPvc(ctx, pvc)
-	return
+	return j.createNewPvc(ctx, pvc)
 }
 
 func (j *upgradeJob) createNewPvc(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (err error) {
@@ -430,7 +457,7 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 		return
 	}
 
-	// 3. parse j.inClusterConfig and j.inClusterOverrides from 3.x if isHostCluster
+	// 2. parse j.inClusterConfig and j.inClusterOverrides from 3.x if isHostCluster
 	if j.isHostCluster, err = j.coreHelper.IsHostCluster(ctx); err != nil {
 		return
 	}
@@ -454,13 +481,13 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 			}
 			j.enabledClusters = append(j.enabledClusters, cluster.Name)
 
-			// 3.1 setup devops configurations into j.inClusterOverrides from cluster
+			// 2.1 setup devops configurations into j.inClusterOverrides from cluster
 			if err = j.parseSystemValues(cluster); err != nil {
 				klog.Errorf("[%s]parsed system values error: %+v", cluster.Name, err)
 				return
 			}
 
-			// 3.2 setup argocd configurations into j.inClusterOverrides from cluster
+			// 2.2 setup argocd configurations into j.inClusterOverrides from cluster
 			if err = j.parseArgocdValues(cluster); err != nil {
 				if !errors.Is(err, storage.BackupKeyNotFound) {
 					klog.Errorf("[%s]parsed argocd values error: %+v", cluster.Name, err)
@@ -469,7 +496,7 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 				klog.Warningf("[%s]the argocd release not exist in storage, ignore parse argocd values", cluster.Name)
 			}
 
-			// 3.3 setup jenkins configurations(resources/persistence/smtp/sonarqube) into j.inClusterOverrides from cluster
+			// 2.3 setup jenkins configurations(resources/persistence/smtp/sonarqube) into j.inClusterOverrides from cluster
 			if err = j.parseJenkinsValues(cluster); err != nil {
 				klog.Errorf("[%s]parsed jenkins values: %+v", cluster.Name, err)
 				return
@@ -480,14 +507,14 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 			}
 		}
 
-		// 4. install DevOps by InstallPlan
+		// 3. install DevOps by InstallPlan
 		if err = j.install(ctx); err != nil {
 			klog.Errorf("install devops error: %+v", err)
 			return
 		}
 	}
 
-	// check if DevOps enabled in current cluster
+	// 4. check if DevOps enabled in current cluster
 	var enabled bool
 	if enabled, err = j.coreHelper.PluginEnabled(ctx, nil, EnabledPaths...); err != nil {
 		klog.Errorf("check DevOps enabled error: %+v", err)
@@ -498,32 +525,7 @@ func (j *upgradeJob) PostUpgrade(ctx context.Context) (err error) {
 		return
 	}
 
-	// 5. update labels of DevOpsProjects namespace
-	klog.Infof("update labels of DevOpsProjects namespace ..")
-	projects := &devopsv1alpha3.DevOpsProjectList{}
-	if err = j.clientV4.List(ctx, projects); err != nil {
-		klog.Errorf("list devops-projects error: %+v", err)
-		return
-	}
-	for _, proj := range projects.Items {
-		projNs := &corev1.Namespace{}
-		if err = j.clientV4.Get(ctx, types.NamespacedName{Name: proj.Name}, projNs); err != nil {
-			klog.Errorf("get namespace of devops-project %s error: %+v", proj.Name, err)
-			return
-		}
-		_, managedByDevOpsExtension := projNs.Labels[ManagedKey]
-		_, managedByWorkspace := projNs.Labels[WorkspaceKey]
-		if !managedByDevOpsExtension || !managedByWorkspace {
-			klog.Infof("update namespace %s", projNs.Name)
-			projNs.Labels[ManagedKey] = ManagedTrue
-			projNs.Labels[WorkspaceKey] = proj.Labels[WorkspaceKey]
-			if err = j.clientV4.Update(ctx, projNs); err != nil {
-				return
-			}
-		}
-	}
-
-	// 6. job done
+	// 5. job done
 	var extensionRefBytes []byte
 	if extensionRefBytes, err = yaml.Marshal(j.extensionRef); err != nil {
 		klog.Errorf("marshal j.extensionRef to bytes error: %+v", err)

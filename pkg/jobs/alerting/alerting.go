@@ -396,6 +396,10 @@ func (i *upgradeJob) PostUpgrade(ctx context.Context) error {
 		}
 	}
 
+	if err := i.coreHelper.SyncHelmChart(ctx, i.extensionRef); err != nil {
+		return err
+	}
+	
 	// save job done time
 	date = []byte(time.Now().UTC().String())
 	klog.Infof("save data key: %s value: %s", jobDone, date)
