@@ -451,6 +451,7 @@ func (i *upgradeJob) deleteKubeSphereWebhook(ctx context.Context) error {
 
 		for _, webhook := range mutatingWebhooks.Items {
 			if len(webhook.Webhooks) > 0 &&
+				webhook.Webhooks[0].ClientConfig.Service != nil &&
 				webhook.Webhooks[0].ClientConfig.Service.Name == "ks-controller-manager" &&
 				webhook.Webhooks[0].ClientConfig.Service.Namespace == constants.KubeSphereNamespace {
 				mutatingWebhooks.Items = append(mutatingWebhooks.Items, webhook)
