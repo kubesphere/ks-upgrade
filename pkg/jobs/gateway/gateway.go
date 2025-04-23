@@ -595,9 +595,12 @@ func (i *upgradeJob) cleanGatewayV1CRDAndCR(ctx context.Context) error {
 	if err := i.clientV4.Delete(ctx, crd); err != nil && !k8serrors.IsNotFound(err) {
 		return err
 	}
-	err := wait.PollImmediate(defaultPollImmediateInterval, defaultPollImmediateTimeout, func() (bool, error) {
-		if err := i.clientV3.List(ctx, &gatewayv1alpha1.GatewayList{}); err != nil {
-			return true, nil
+	err := wait.PollImmediateWithContext(ctx, defaultPollImmediateInterval, defaultPollImmediateTimeout, func(ctx context.Context) (bool, error) {
+		if err := i.clientV4.Get(ctx, runtimeclient.ObjectKeyFromObject(crd), crd); err != nil {
+			if k8serrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
 		}
 		klog.Infof("wait for gateway v1 crd deleted")
 		return false, nil
